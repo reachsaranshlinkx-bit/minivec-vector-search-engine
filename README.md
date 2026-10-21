@@ -1,26 +1,54 @@
 # MiniVec
 
-**MiniVec** is an independent educational vector search engine built from first principles in Python. It is designed to demystify how vector databases (such as Qdrant, Milvus, and Pinecone) store high-dimensional embeddings, filter metadata payloads, execute exact similarity searches, and persist data safely to disk with thread-safe synchronization and robust operational hardening.
+**MiniVec** is an independent, first-principles vector search engine and database built in Python. Designed for educational study and portfolio demonstration, it demystifies how modern vector databases (such as Qdrant, Milvus, and Pinecone) store high-dimensional embeddings, execute exact and graph-based approximate similarity searches, filter metadata payloads, and guarantee transactional crash resilience using SQLite Write-Ahead Logging (WAL).
 
 ---
 
-## 💡 Background & Purpose
+## 💡 Background & Attribution
 
-During Phase 2 (Project Design), vector database paradigms and architectural concepts were studied by referencing the open-source [Qdrant](https://github.com/qdrant/qdrant) project. MiniVec translates those core concepts into a clean, readable, first-principles Python implementation.
+During Phase 2 (Project Design), core vector database paradigms were studied by referencing the open-source [Qdrant](https://github.com/qdrant/qdrant) project. MiniVec translates those distributed concepts into an accessible, educational Python implementation.
 
-> **Notice:** MiniVec is an independent educational project for study and portfolio demonstration. It does not contain code from Qdrant and is not a direct replacement for production vector search engines. See [NOTICE](NOTICE) for full attribution details.
+> **Notice:** MiniVec is an independent educational project for portfolio demonstration and systems study. It does not contain code from Qdrant and is not a drop-in replacement for production-grade distributed vector search engines. See [NOTICE](NOTICE) for full attribution details.
+
+---
+
+## 🏛️ System Architecture
+
+MiniVec uses a layered, thread-safe architecture that separates REST routing, multi-collection lifecycle management, in-memory vector storage, graph indexing, and durable on-disk persistence:
+
+```mermaid
+graph TD
+    Client["Client / User / Test Suite"] --> API["FastAPI REST API Layer"]
+    API --> Lifespan["Lifespan Context Manager (Graceful DB Cleanup)"]
+    API --> Engine["MiniVecEngine (Multi-Collection Coordinator)"]
+    
+    Engine --> Collection["Collection (Thread-Safe In-Memory Cache)"]
+    
+    Collection --> SearchRouter{"Search Router"}
+    SearchRouter -- "search_type='exact' (Default)" --> ExactScan["Exact Flat Scan (NumPy Vectorized BLAS)"]
+    SearchRouter -- "search_type='approx' (No Filter)" --> HNSW["HNSW Graph Index (Hierarchical Skip-Graph)"]
+    SearchRouter -- "search_type='approx' + Filter" --> Fallback["Exact Pre-Filtered Fallback (100% Filter Guarantee)"]
+    
+    HNSW --> GreedyRouting["Greedy Zoom (Layers > 0)"]
+    HNSW --> BeamSearch["Beam Search (Layer 0, ef Candidates)"]
+    
+    Collection --> FilterEngine["Metadata Filter Engine (eq, ne, gt, gte, lt, lte, in)"]
+    ExactScan --> DistanceEngine["Metric Calculations (Cosine, Euclidean, Dot)"]
+    
+    Collection -- "Write-Through Transaction" --> SQLite["SQLite3 Persistence (WAL Mode, Float32 Blobs, JSON)"]
+```
 
 ---
 
 ## 🛠️ Technology Stack
 
-- **Python**: 3.11+ (verified on Python 3.12)
-- **FastAPI & Uvicorn**: High-performance asynchronous REST API framework
+- **Python**: 3.11+ (verified on Python 3.12.14)
+- **FastAPI & Uvicorn**: Asynchronous REST API framework with Swagger UI documentation
 - **NumPy**: Vectorized linear algebra operations and distance calculations (Cosine, Dot Product, Euclidean)
-- **Pydantic**: Robust data validation and schema definitions
-- **SQLite3**: Standard library persistent storage with WAL mode, atomic transactions, and binary vector serialization
-- **pytest & httpx**: Automated test harness for unit, integration, persistence, and concurrency testing
-- **uv**: Modern, ultra-fast Python package and project manager
+- **Pydantic v2**: Request/response serialization, resource safety bounds, and type-safe configuration
+- **SQLite3**: Python standard library storage engine with Write-Ahead Logging (WAL) and atomic transactions
+- **pytest & httpx**: Automated test harness covering unit, integration, persistence, and concurrency tests
+- **uv**: Deterministic package and virtual environment management via `uv.lock`
 
 ---
 
@@ -28,20 +56,18 @@ During Phase 2 (Project Design), vector database paradigms and architectural con
 
 - [x] **Milestone 0: Project Scaffolding & Environment Setup**
   - Declarative configuration via `pyproject.toml`
-  - `src/` layout packaging
-  - Virtual environment & dependency management with `uv`
+  - Deterministic dependency locking via `uv.lock`
   - Baseline test harness with `pytest`
 - [x] **Milestone 1: Vector Storage & Validation**
   - High-dimensional vector representation with float32 NumPy arrays
-  - Dimension consistency validation, NaN/Inf checks
-  - In-memory collection data structures with defensive isolation
+  - Dimension consistency validation, NaN/Inf checks, and defensive data copying
 - [x] **Milestone 2: Exact Similarity Search**
-  - Cosine similarity, dot product, and Euclidean distance implementations
+  - Vectorized Cosine similarity, Dot product, and Euclidean distance
   - Deterministic tie-breaking by point ID
-  - Top-$k$ retrieval algorithms
+  - Top-$k$ ranking algorithms
 - [x] **Milestone 3: Metadata Filtering (Payloads)**
   - Schema-less payload filtering (`eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`)
-  - Efficient pre-filtering strategy combined with AND semantics
+  - Efficient pre-filtering strategy combined with boolean AND semantics
 - [x] **Milestone 4: REST API with FastAPI**
   - Clean REST endpoints for collection lifecycle, point upsert, and vector search
   - Strict Pydantic validation and consistent HTTP error mapping
@@ -63,13 +89,16 @@ During Phase 2 (Project Design), vector database paradigms and architectural con
   - Automatic synchronization on new point insertions and safe index reconstruction after SQLite restarts
   - Filter safety: automatic fallback to exact pre-filtered search when metadata filters are supplied
   - Mathematical Recall@k evaluation module and repeatable benchmarks across synthetic clustered datasets
-- [ ] **Milestone 8: Performance Optimization, Memory Profiling & Production Hardening**
+- [x] **Milestone 8: Portfolio Wrap-up, Reproducible Demo & Project Verification**
+  - Standalone deterministic demonstration script (`demo.py`) with zero-leakage temporary database isolation
+  - Direct evaluation CLI (`python -m minivec.eval`) reporting empirical Recall@k, latencies, and speedups
+  - Comprehensive documentation, Mermaid diagrams, and interview defence notes
 
 ---
 
 ## ⚙️ Configuration & Environment Variables
 
-MiniVec provides centralized, type-safe configuration via `pydantic.BaseModel` in `src/minivec/config.py`. All settings have sensible defaults and can be configured through environment variables:
+MiniVec provides centralized, type-safe configuration via `pydantic.BaseModel` in [src/minivec/config.py](src/minivec/config.py). All settings have sensible defaults and can be configured through environment variables:
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
@@ -86,7 +115,7 @@ MiniVec provides centralized, type-safe configuration via `pydantic.BaseModel` i
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Getting Started (Windows PowerShell)
 
 ### Prerequisites
 
@@ -95,17 +124,46 @@ MiniVec provides centralized, type-safe configuration via `pydantic.BaseModel` i
 
 ### 1. Environment Setup
 
-Create the local virtual environment and install dependencies:
+Synchronize dependencies and install MiniVec in editable mode:
 
 ```powershell
-# Create virtual environment with Python 3.12
-uv venv --python 3.12
-
-# Synchronize dependencies and install MiniVec in editable mode
-uv sync
+# Create virtual environment and synchronize dependencies from uv.lock
+uv sync --locked
 ```
 
-### 2. Starting the REST API Server
+### 2. Run the Automated Test Suite
+
+Execute the full suite of 211 tests (including unit, persistence, concurrency, HNSW, and demo tests):
+
+```powershell
+uv run pytest -v
+```
+
+### 3. Run the Deterministic Demonstration
+
+Execute the self-contained demonstration script:
+
+```powershell
+uv run python demo.py
+```
+
+*What the demo does:*
+- Creates an isolated temporary SQLite database (completely preserving your development database).
+- Ingests 6 product embeddings with metadata payloads.
+- Executes exact Cosine similarity search.
+- Constructs an HNSW graph index and runs approximate search.
+- Executes compound pre-filtered search (`category == 'electronics' AND price <= 300`).
+- Reopens the SQLite database from disk to verify crash recovery.
+
+### 4. Run the Recall@k Benchmark CLI
+
+Reproduce empirical Recall@k and query latency metrics across Cosine, Euclidean, and Dot Product metrics:
+
+```powershell
+uv run python -m minivec.eval
+```
+
+### 5. Starting the REST API Server
 
 Run the development server via Uvicorn:
 
@@ -113,42 +171,44 @@ Run the development server via Uvicorn:
 uv run uvicorn minivec.api:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Interactive API documentation (Swagger UI) is available at:
+Interactive OpenAPI documentation (Swagger UI) is available at:
 `http://127.0.0.1:8000/docs`
 
-### 3. API Usage Examples (PowerShell)
+---
 
-#### Health Check
+## 💻 API Usage Examples (PowerShell)
+
+### Health Check
 ```powershell
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/health" -Method Get
 ```
 
-#### Create a Collection
+### Create a Collection
 ```powershell
-$body = @{ name = "products"; dimension = 3 } | ConvertTo-Json
+$body = @{ name = "products"; dimension = 4 } | ConvertTo-Json
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/collections" -Method Post -Body $body -ContentType "application/json"
 ```
 
-#### Insert Points
+### Insert Points with Metadata
 ```powershell
-$point1 = @{
+$point = @{
     id = "prod-101"
-    vector = @(0.9, 0.1, 0.0)
-    payload = @{ category = "electronics"; price = 299.99; in_stock = $true }
+    vector = @(0.95, 0.10, 0.05, 0.00)
+    payload = @{ title = "Headphones"; category = "electronics"; price = 249.99; in_stock = $true }
 } | ConvertTo-Json
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/collections/products/points" -Method Post -Body $point1 -ContentType "application/json"
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/collections/products/points" -Method Post -Body $point -ContentType "application/json"
 ```
 
-#### Vector Search with Metadata Pre-Filtering
+### Exact & Filtered Vector Search
 ```powershell
 $searchQuery = @{
-    query = @(1.0, 0.0, 0.0)
-    limit = 5
+    query = @(0.92, 0.12, 0.06, 0.01)
+    limit = 3
     metric = "cosine"
     filter = @{
         must = @(
             @{ key = "category"; operator = "eq"; value = "electronics" },
-            @{ key = "price"; operator = "lte"; value = 500 }
+            @{ key = "price"; operator = "lte"; value = 300.0 }
         )
     }
     with_payload = $true
@@ -158,70 +218,43 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8000/collections/products/search" -Meth
 
 ---
 
-## 🛡️ Reliability & Security Architecture
-
-1. **FastAPI Lifespan Management**:
-   The engine and SQLite storage are managed cleanly via `@asynccontextmanager async def lifespan(app: FastAPI)`. When Uvicorn or test runners stop, storage connections and lock files are gracefully closed and flushed without leaking file descriptors.
-
-2. **Thread Concurrency & Synchronization**:
-   Internal dictionaries and SQLite write transactions are protected by reentrant locks (`threading.RLock`). Search candidate snapshotting occurs under lock while compute-intensive distance matrix calculations run outside the lock, avoiding write starvation and blocking.
-
-3. **Resource & Safety Limits**:
-   Configurable guards prevent denial-of-service or memory exhaustion by rejecting oversized vectors ($> 4096$), top-$k$ search limits ($> 1000$), and payloads ($> 64\text{ KB}$) with HTTP 422 Unprocessable Entity.
-
-4. **Sanitized Error Handling**:
-   Custom exception handlers intercept internal errors and `StorageError`, returning clean error responses while hiding database filepaths, table structures, and internal Python tracebacks from clients.
-
-5. **Privacy-Safe Audit Logging**:
-   Operational audit logs record timestamps, endpoint paths, collection names, point IDs, hit counts, and execution latency (ms), but strictly omit raw vector floats and payload values to prevent privacy and credential leaks.
-
 ## ⚡ Approximate Nearest-Neighbor (HNSW) & Recall@k
 
-MiniVec includes an educational, pure-Python implementation of the **Hierarchical Navigable Small World (HNSW)** algorithm (`src/minivec/hnsw.py`), without external C++ or third-party ANN dependencies.
+MiniVec implements an educational, pure-Python version of the **Hierarchical Navigable Small World (HNSW)** algorithm ([src/minivec/hnsw.py](src/minivec/hnsw.py)) based on Malkov & Yashunin (2018).
 
-### 1. Key Concepts
-- **Multi-Layer Skip-Graph**: Layer 0 holds all points with dense local links. Upper layers act as expressways with exponentially fewer points to guide coarse-grained routing across high-dimensional space.
-- **Metric-Specific Indices**: Separate HNSW indices can be constructed for `cosine`, `euclidean`, or `dot` metrics (`collection.create_index(metric=...)`).
-- **Dynamic Synchronization**: New points inserted via `collection.add_point()` automatically synchronize with active indices.
-- **Filter Correctness**: If a metadata `Filter` is provided with `search_type="approx"`, MiniVec falls back to exact pre-filtered search to prevent silent filter violations.
+### 1. Key Algorithmic Concepts
 
-### 2. Python API Example
-```python
-from minivec import Collection, DistanceMetric
+- **Multi-Layer Skip-Graph**: Vectors are assigned a maximum layer $l = \lfloor -\ln(U) \cdot m_L \rfloor$. Layer 0 contains all points with dense local links. Higher layers contain exponentially fewer nodes, serving as expressways for rapid coarse-grained routing across high-dimensional space.
+- **Unified Distance Metrics**: Graph traversal requires that smaller values indicate closer matches. MiniVec maps similarity metrics into monotonic distances:
+  - Cosine: $d = 1.0 - \text{sim} \in [0.0, 2.0]$
+  - Euclidean: $d = \|\mathbf{u} - \mathbf{v}\|_2 \in [0.0, \infty)$
+  - Dot Product: $d = -(\mathbf{u} \cdot \mathbf{v})$ (higher dot product $\implies$ smaller distance)
+- **Metric-Specific Indices**: Collections maintain separate indices per metric (`col.create_index(metric=...)`). If approximate search is requested with a metric that has no index, MiniVec safely falls back to exact search with that metric rather than returning inconsistent rankings.
+- **Why Filtered Search Falls Back to Exact Pre-Filtering**: In graph-based ANN, routing through arbitrary sparse metadata filters risks trapping the search in disconnected graph components or returning false empty results. MiniVec routes filtered approximate queries through exact pre-filtered search, guaranteeing 100% adherence to filter constraints.
 
-col = Collection("docs", dimension=16)
-# Build an HNSW index
-col.create_index(metric=DistanceMetric.COSINE, m=16, ef_construction=64, ef_search=32)
+### 2. HNSW Hyperparameters Explained
 
-# Add points (automatically updates index)
-col.add_point("doc_1", [0.1] * 16)
+| Parameter | Default | Role & Trade-off |
+| :--- | :--- | :--- |
+| `m` | `16` | Maximum outgoing edges per node on layers $> 0$. Higher $m$ improves recall on complex topologies at the cost of higher memory and build time. |
+| `m0` | `32` ($2m$) | Maximum outgoing edges on Layer 0. Doubled because Layer 0 performs final nearest-neighbor clustering. |
+| `ef_construction` | `64` | Candidate queue size during insertion. Higher values produce better graph connectivity at the cost of slower index construction. |
+| `ef_search` | `32` | Candidate queue size during query beam search. Higher values increase Recall@k at the cost of additional distance calculations. |
 
-# Approximate search
-approx_hits = col.search(query=[0.1] * 16, limit=5, search_type="approx")
+### 3. Empirical Recall@k Benchmarks
 
-# Exact ground-truth search remains available
-exact_hits = col.search(query=[0.1] * 16, limit=5, search_type="exact")
-```
+Measured on synthetic clustered Gaussian datasets ($k=10$, 20 queries, deterministic seeds):
 
-### 3. Recall@k Evaluation
-The evaluation harness (`src/minivec/eval.py`) computes:
-$$\text{Recall}@k = \frac{|\text{Exact}_k \cap \text{Approx}_k|}{\min(|\text{Exact}_k|, k)}$$
+| Metric | Dataset ($N \times D$) | Mean Recall@10 | Min Recall@10 | Max Recall@10 | Exact Latency | Approx Latency | Speedup |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Cosine** | $300 \times 16$ | **85.00%** | **0.00%** | **100.00%** | $2.18\text{ ms}$ | $1.24\text{ ms}$ | **$1.76\times$** |
+| **Euclidean** | $250 \times 8$ | **87.50%** | **20.00%** | **100.00%** | $1.42\text{ ms}$ | $0.64\text{ ms}$ | **$2.22\times$** |
+| **Dot Product** | $250 \times 8$ | **100.00%** | **100.00%** | **100.00%** | $1.51\text{ ms}$ | $0.42\text{ ms}$ | **$3.63\times$** |
 
-On synthetic clustered Gaussian datasets ($N=300, D=16, k=10$):
-- **Cosine Recall@10**: $\approx 85.0\%$, achieving $1.73\times$ speedup over exact numpy scan.
-- **Euclidean Recall@10**: $\approx 87.5\%$, achieving $2.32\times$ speedup over exact numpy scan.
-
----
-
-## 🧪 Testing
-
-Run the full automated test suite (209 passing tests):
-
-```powershell
-uv run pytest -v
-```
-
-All tests execute against temporary isolated databases (`tmp_path`) and strictly preserve `data/minivec.db`.
+> **Honest Engineering Note on the 0% Minimum Cosine Recall:**
+> Empirical evaluation revealed three outlier queries (`[7, 11, 17]`) with 0.0% Recall@10. An in-depth investigation demonstrated that increasing query-time exploration alone (`ef_search=32`, `64`, `128`, and `300` across the full dataset) did not recover these neighbors: Recall@10 remained 0.0%. A graph reachability analysis revealed that only 46 of 300 nodes were reachable on Layer 0 from the entry point's connected component, and the true nearest neighbors (e.g. `d_50` for query 7) resided in a disconnected component.
+>
+> Because the target vectors were unreachable through the entered component, increasing query-time exploration alone could not solve the issue. This highlights an authentic graph-connectivity limitation in this educational HNSW implementation when indexing sparse, widely separated clusters with basic nearest-neighbor pruning. Potential future improvements—such as larger $M$, construction-time edge selection heuristics that favor directional diversity, or multi-component entry points—could help bridge isolated clusters, but are not guaranteed and are not currently implemented.
 
 ---
 
@@ -232,7 +265,8 @@ Minivec/
 ├── .env.example              # Environment variables template
 ├── .gitignore                # Git ignore rules (protects data/ and db files)
 ├── NOTICE                    # Educational attribution notice
-├── README.md                 # Project documentation
+├── README.md                 # Project documentation & architecture
+├── demo.py                   # Self-contained runnable demonstration script
 ├── pyproject.toml            # Project metadata and dependencies
 ├── uv.lock                   # Deterministic lockfile
 ├── src/
@@ -243,7 +277,7 @@ Minivec/
 │       ├── config.py         # Type-safe Pydantic configuration & logging
 │       ├── distance.py       # Vectorized distance & similarity functions
 │       ├── engine.py         # Multi-collection engine & lifecycle manager
-│       ├── eval.py           # Recall@k calculation & benchmark harness
+│       ├── eval.py           # Recall@k calculation, benchmark harness & CLI
 │       ├── exceptions.py     # Domain exceptions
 │       ├── filter.py         # Structured metadata filtering & operators
 │       ├── hnsw.py           # Educational HNSW graph-based approximate index
@@ -254,6 +288,7 @@ Minivec/
 └── tests/
     ├── __init__.py
     ├── test_api.py           # REST API endpoint tests
+    ├── test_demo.py          # Demo execution & database safety tests
     ├── test_evaluation.py    # Recall@k benchmarks & filter fallback tests
     ├── test_filter.py        # Metadata filtering tests
     ├── test_hnsw.py          # HNSW unit & graph structure tests

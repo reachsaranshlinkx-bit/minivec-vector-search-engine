@@ -196,3 +196,48 @@ def generate_clustered_dataset(
     queries = centers[query_assignments] + query_noise
 
     return points, queries
+
+
+def run_cli_evaluation() -> None:
+    """Execute reproducible benchmarks for Cosine, Euclidean, and Dot metrics and print results."""
+    print("=" * 76)
+    print("MiniVec — Approximate Search Recall@k & Latency Evaluation")
+    print("=" * 76)
+    print("NOTE: Measurements reflect actual benchmark execution on this machine.")
+    print("      HNSW provides probabilistic, empirical speedup, not worst-case O(log N).")
+    print("=" * 76)
+
+    metrics_to_eval = [
+        (DistanceMetric.COSINE, 300, 16, 6, 42),
+        (DistanceMetric.EUCLIDEAN, 250, 8, 4, 99),
+        (DistanceMetric.DOT, 250, 8, 4, 123),
+    ]
+
+    for metric, n_pts, dim, n_clusters, seed in metrics_to_eval:
+        points, queries = generate_clustered_dataset(
+            num_points=n_pts,
+            dimension=dim,
+            num_clusters=n_clusters,
+            random_seed=seed,
+        )
+        col = Collection(f"bench_{metric.value}", dimension=dim)
+        col.create_index(
+            metric=metric,
+            m=16,
+            ef_construction=64,
+            ef_search=32,
+            random_seed=seed,
+        )
+        for i, vec in enumerate(points):
+            col.add_point(f"doc_{i}", vec)
+
+        report = evaluate_recall(col, queries=queries, k=10, metric=metric)
+        print(f"\n{report.summary()}")
+
+    print("\n" + "=" * 76)
+    print("Evaluation completed successfully.")
+    print("=" * 76)
+
+
+if __name__ == "__main__":
+    run_cli_evaluation()

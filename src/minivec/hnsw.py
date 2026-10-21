@@ -219,6 +219,13 @@ class HNSWIndex:
                             curr_obj = neighbor_id
                             changed = True
 
+            # If newly inserted node exceeds current max_layer, initialize its adjacency
+            # map entries on the new upper layers where it is currently the sole node.
+            old_max_layer = self.max_layer
+            if target_level > old_max_layer:
+                for l in range(old_max_layer + 1, target_level + 1):
+                    self.layers[l][point_id] = []
+
             # Phase 2: Beam search and connect on layers from min(max_layer, target_level) down to 0
             ep_list = [curr_obj]
             for l in range(min(self.max_layer, target_level), -1, -1):

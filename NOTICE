@@ -1,0 +1,24 @@
+MiniVec - Educational Vector Search Engine
+Copyright (c) 2026 MiniVec Project Contributors
+
+================================================================================
+ATTRIBUTION & EDUCATIONAL PURPOSE NOTICE
+================================================================================
+
+MiniVec is an independent educational software project developed from scratch 
+for the study and practice of AI engineering, vector indexing concepts, and 
+high-performance Python system architecture.
+
+During the preliminary research phase (Phase 2 - Project Design), architectural 
+concepts and vector search paradigms were studied with reference to the 
+open-source vector search engine Qdrant (https://github.com/qdrant/qdrant).
+
+Important Disclaimers:
+1. MiniVec is NOT a fork, copy, or drop-in replacement for Qdrant.
+2. None of Qdrant's Rust source code or proprietary implementation details 
+   are copied or included in this project.
+3. MiniVec is designed specifically for pedagogical and learning purposes, 
+   focusing on first-principles understanding of vector representations, 
+   distance metrics, filtering, persistence, and evaluation in Python.
+4. "Qdrant" is a trademark of Qdrant Solutions GmbH. This project is not 
+   affiliated with, endorsed by, or sponsored by Qdrant Solutions GmbH.

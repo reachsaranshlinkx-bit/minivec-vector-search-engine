@@ -18,15 +18,17 @@ MiniVec uses a layered, thread-safe architecture that separates REST routing, mu
 
 ```mermaid
 graph TD
-    Client["Client / User / Test Suite"] --> API["FastAPI REST API Layer"]
+    HTTPClient["HTTP Client (FastAPI REST API)"] --> API["FastAPI REST API Layer (Exact Search & CRUD)"]
+    PythonClient["Python Client / CLI (demo.py, eval.py)"] --> Engine["MiniVecEngine (Multi-Collection Coordinator)"]
+
     API --> Lifespan["Lifespan Context Manager (Graceful DB Cleanup)"]
-    API --> Engine["MiniVecEngine (Multi-Collection Coordinator)"]
+    API --> Engine
     
     Engine --> Collection["Collection (Thread-Safe In-Memory Cache)"]
     
     Collection --> SearchRouter{"Search Router"}
-    SearchRouter -- "search_type='exact' (Default)" --> ExactScan["Exact Flat Scan (NumPy Vectorized BLAS)"]
-    SearchRouter -- "search_type='approx' (No Filter)" --> HNSW["HNSW Graph Index (Hierarchical Skip-Graph)"]
+    SearchRouter -- "search_type='exact' (REST & Python Default)" --> ExactScan["Exact Flat Scan (NumPy Vectorized BLAS)"]
+    SearchRouter -- "search_type='approx' (Python API Only, No Filter)" --> HNSW["HNSW Graph Index (Hierarchical Skip-Graph)"]
     SearchRouter -- "search_type='approx' + Filter" --> Fallback["Exact Pre-Filtered Fallback (100% Filter Guarantee)"]
     
     HNSW --> GreedyRouting["Greedy Zoom (Layers > 0)"]
@@ -37,6 +39,10 @@ graph TD
     
     Collection -- "Write-Through Transaction" --> SQLite["SQLite3 Persistence (WAL Mode, Float32 Blobs, JSON)"]
 ```
+
+> **Interface Distinction (REST API vs. Python API):**
+> - **REST API (`/collections/{name}/search`)**: Exposes collection management, point upsert/retrieval, and **exact vector similarity search** with metadata filtering over HTTP.
+> - **Python API (`Collection`)**: Exposes the complete engine feature set, including building metric-specific HNSW indices (`col.create_index()`), running approximate graph searches (`col.search(..., search_type="approx")`), and running benchmark evaluations.
 
 ---
 
@@ -86,7 +92,7 @@ graph TD
 - [x] **Milestone 7: Approximate Nearest-Neighbor Search (ANN) & Recall@k Evaluation**
   - Educational pure-Python Hierarchical Navigable Small World (HNSW) index without external ANN libraries
   - Metric-specific graph routing supporting Cosine similarity, Euclidean distance, and Dot product
-  - Automatic synchronization on new point insertions and safe index reconstruction after SQLite restarts
+  - Real-time synchronization of active in-memory indices on new point insertions; durable SQLite persistence for raw vectors and payloads with explicit on-demand index reconstruction via the Python API
   - Filter safety: automatic fallback to exact pre-filtered search when metadata filters are supplied
   - Mathematical Recall@k evaluation module and repeatable benchmarks across synthetic clustered datasets
 - [x] **Milestone 8: Portfolio Wrap-up, Reproducible Demo & Project Verification**
@@ -98,7 +104,21 @@ graph TD
 
 ## ⚙️ Configuration & Environment Variables
 
-MiniVec provides centralized, type-safe configuration via `pydantic.BaseModel` in [src/minivec/config.py](src/minivec/config.py). All settings have sensible defaults and can be configured through environment variables:
+MiniVec provides centralized, type-safe configuration via `pydantic.BaseModel` in [src/minivec/config.py](src/minivec/config.py). All settings have sensible defaults and are configured using **operating-system environment variables**.
+
+> **Important:** MiniVec reads environment variables directly from the host operating system (`os.getenv`) and does **not** automatically parse or load a local `.env` file at runtime. The [.env.example](.env.example) file is provided as a reference template.
+
+### Setting Variables in Windows PowerShell
+```powershell
+# Set variables for the current PowerShell session
+$env:PORT = "8000"
+$env:LOG_LEVEL = "DEBUG"
+$env:DATA_DIR = "./data"
+
+# Verify variable is set
+$env:PORT
+```
+*(On Linux/macOS, use `export PORT=8000`)*
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
@@ -133,7 +153,7 @@ uv sync --locked
 
 ### 2. Run the Automated Test Suite
 
-Execute the full suite of 211 tests (including unit, persistence, concurrency, HNSW, and demo tests):
+Execute the full suite of 214 tests (including unit, persistence, concurrency, HNSW regression, and demo tests):
 
 ```powershell
 uv run pytest -v
@@ -225,6 +245,8 @@ MiniVec implements an educational, pure-Python version of the **Hierarchical Nav
 ### 1. Key Algorithmic Concepts
 
 - **Multi-Layer Skip-Graph**: Vectors are assigned a maximum layer $l = \lfloor -\ln(U) \cdot m_L \rfloor$. Layer 0 contains all points with dense local links. Higher layers contain exponentially fewer nodes, serving as expressways for rapid coarse-grained routing across high-dimensional space.
+- **Upper-Layer Insertion Invariant**: When an inserted node receives a level $L$ higher than the current `max_layer`, its adjacency list `layers[l][point_id] = []` is explicitly initialized across every elevated layer $l \in (\text{old\_max\_layer}, L]$. Because it is initially the sole node on those upper layers, its neighbor list starts empty, and it is safely promoted to `entry_point`. This guarantees that `entry_point in layers[max_layer]` always holds, degree bounds remain valid, and subsequent nodes on elevated layers can discover and bidirectionally connect to it.
+- **In-Memory Lifecycle & Persistence Distinction**: SQLite persistence stores raw vectors, point IDs, and JSON payloads durably on disk. HNSW graph indexes are **ephemeral in-memory structures** and are **not persisted to SQLite or automatically reconstructed on restart**. When reloading a collection from SQLite, the Python API can explicitly rebuild an index on demand via `col.create_index(metric=...)`. If approximate search (`search_type="approx"`) is requested without an index for that metric, MiniVec safely falls back to exact search.
 - **Unified Distance Metrics**: Graph traversal requires that smaller values indicate closer matches. MiniVec maps similarity metrics into monotonic distances:
   - Cosine: $d = 1.0 - \text{sim} \in [0.0, 2.0]$
   - Euclidean: $d = \|\mathbf{u} - \mathbf{v}\|_2 \in [0.0, \infty)$
@@ -264,6 +286,7 @@ Measured on synthetic clustered Gaussian datasets ($k=10$, 20 queries, determini
 Minivec/
 ├── .env.example              # Environment variables template
 ├── .gitignore                # Git ignore rules (protects data/ and db files)
+├── LICENSE                   # Canonical MIT License
 ├── NOTICE                    # Educational attribution notice
 ├── README.md                 # Project documentation & architecture
 ├── demo.py                   # Self-contained runnable demonstration script

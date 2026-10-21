@@ -15,8 +15,9 @@ from pydantic import BaseModel, Field
 class Settings(BaseModel):
     """Central configuration for MiniVec.
 
-    Default values can be overridden via environment variables or loaded
-    from a local .env file.
+    Settings are defined with safe defaults and can be customized via
+    operating-system environment variables. Note that local .env files
+    are not loaded automatically; variables must be set in the host environment.
     """
 
     app_name: str = Field(default="MiniVec", description="Name of the application")

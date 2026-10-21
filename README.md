@@ -1,6 +1,6 @@
 # MiniVec
 
-**MiniVec** is an independent, first-principles vector search engine and database built in Python. Designed for educational study and portfolio demonstration, it demystifies how modern vector databases (such as Qdrant, Milvus, and Pinecone) store high-dimensional embeddings, execute exact and graph-based approximate similarity searches, filter metadata payloads, and guarantee transactional crash resilience using SQLite Write-Ahead Logging (WAL).
+**MiniVec** is an independent, first-principles vector search engine and database built in Python. Designed for educational study and portfolio demonstration, it demystifies how modern vector databases (such as Qdrant, Milvus, and Pinecone) store high-dimensional embeddings, execute exact and graph-based approximate similarity searches, filter metadata payloads, and use SQLite WAL and atomic transactions for durable persistence, using SQLite Write-Ahead Logging (WAL).
 
 ---
 

@@ -17,6 +17,7 @@ from minivec.exceptions import (
     ValidationError,
 )
 from minivec.filter import FieldCondition, Filter, FilterOperator
+from minivec.hnsw import HNSWIndex
 from minivec.models import Payload, Point, PointId, ScoredPoint, SearchResult
 from minivec.storage import SQLiteStorage
 
@@ -29,6 +30,7 @@ __all__ = [
     "ScoredPoint",
     "SearchResult",
     "DistanceMetric",
+    "HNSWIndex",
     "Filter",
     "FieldCondition",
     "FilterOperator",

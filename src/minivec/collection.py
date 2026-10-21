@@ -13,6 +13,7 @@ from minivec.config import get_settings
 from minivec.distance import DistanceMetric, compute_scores
 from minivec.exceptions import DuplicateIdError, PointNotFoundError, ValidationError
 from minivec.filter import FieldCondition, Filter, validate_filter
+from minivec.hnsw import HNSWIndex
 from minivec.models import Payload, Point, PointId, ScoredPoint
 from minivec.validation import (
     validate_dimension,
@@ -53,7 +54,7 @@ class Collection:
         self._storage = storage
         self._lock = threading.RLock()
         self._points: dict[PointId, Point] = {}
-
+        self._indices: dict[DistanceMetric, HNSWIndex] = {}
 
     def _clone_point(self, point: Point) -> Point:
         """Return an isolated defensive copy of a Point."""
@@ -71,6 +72,57 @@ class Collection:
                 vector=point.vector.copy(),
                 payload=copy.deepcopy(point.payload),
             )
+            for idx in self._indices.values():
+                idx.add(point.id, point.vector)
+
+    def create_index(
+        self,
+        metric: DistanceMetric | str = DistanceMetric.COSINE,
+        m: int = 16,
+        ef_construction: int = 64,
+        ef_search: int = 32,
+        random_seed: int | None = 42,
+    ) -> HNSWIndex:
+        """Construct and populate a metric-specific HNSW index for this collection.
+
+        Args:
+            metric: Distance metric to build the index for.
+            m: Maximum edges per node on higher layers.
+            ef_construction: Exploration size during index build.
+            ef_search: Default exploration size during search.
+            random_seed: Random seed for deterministic layer assignment.
+
+        Returns:
+            The newly created HNSWIndex instance.
+        """
+        norm_metric = validate_metric(metric)
+        with self._lock:
+            index = HNSWIndex(
+                dimension=self.dimension,
+                metric=norm_metric,
+                m=m,
+                ef_construction=ef_construction,
+                ef_search=ef_search,
+                random_seed=random_seed,
+            )
+            for pt in self._points.values():
+                index.add(pt.id, pt.vector)
+            self._indices[norm_metric] = index
+            return index
+
+    def has_index(self, metric: DistanceMetric | str | None = None) -> bool:
+        """Check if an index exists (optionally for a specific metric)."""
+        with self._lock:
+            if metric is None:
+                return bool(self._indices)
+            norm_metric = validate_metric(metric)
+            return norm_metric in self._indices
+
+    def get_index(self, metric: DistanceMetric | str = DistanceMetric.COSINE) -> HNSWIndex | None:
+        """Retrieve an index for a specific metric, or None if not created."""
+        norm_metric = validate_metric(metric)
+        with self._lock:
+            return self._indices.get(norm_metric)
 
     def add(self, point: Point) -> None:
         """Add a Point to the collection.
@@ -116,6 +168,10 @@ class Collection:
                 vector=valid_vector.copy(),
                 payload=copy.deepcopy(valid_payload),
             )
+
+            # Synchronize active metric-specific approximate indexes
+            for idx in self._indices.values():
+                idx.add(valid_id, valid_vector)
 
     def add_point(
         self,
@@ -205,34 +261,69 @@ class Collection:
         filter: Filter | list[FieldCondition] | FieldCondition | None = None,
         with_payload: bool = True,
         with_vector: bool = False,
+        search_type: str = "exact",
+        ef_search: int | None = None,
     ) -> list[ScoredPoint]:
-        """Perform exact similarity or distance search with optional pre-filtering.
+        """Perform exact or approximate similarity/distance search.
 
-        Filters candidates based on metadata conditions BEFORE calculating
-        vector distances, computes the similarity/distance for all eligible
-        points, and returns the top-k matches ranked appropriately.
-
-        Ties in scores/distances are broken deterministically by point ID.
+        Supports:
+        1. Exact flat scan (ground truth, default).
+        2. Approximate nearest-neighbor search via HNSWIndex when search_type="approx".
+           - Falls back to exact search if a metadata filter is present to preserve filter correctness.
+           - Falls back to exact search if no index was built for the requested metric.
 
         Args:
             query: 1D array-like query vector matching collection dimension.
             limit: Maximum number of top-ranked results to return (k > 0).
             metric: Distance or similarity metric (cosine, dot, or euclidean).
-            filter: Optional Filter, FieldCondition, or list of FieldConditions
-                specifying metadata constraints (combined with AND semantics).
+            filter: Optional Filter specifying metadata constraints (AND semantics).
             with_payload: Whether to include metadata payload in results.
             with_vector: Whether to include defensive copy of vector in results.
+            search_type: Search strategy ("exact" or "approx").
+            ef_search: Optional exploration size override during HNSW approximate search.
 
         Returns:
             List of ScoredPoint instances ranked from best match to worst match.
 
         Raises:
-            ValidationError: If query vector, limit k, metric, or filter is invalid.
+            ValidationError: If query vector, limit k, metric, filter, or search_type is invalid.
         """
+        if search_type not in ("exact", "approx"):
+            raise ValidationError(
+                f"Unsupported search_type '{search_type}'. Expected 'exact' or 'approx'."
+            )
+
         query_vec = validate_vector(query, expected_dim=self.dimension)
         k = validate_limit(limit, max_limit=get_settings().max_search_limit)
         norm_metric = validate_metric(metric)
         norm_filter = validate_filter(filter)
+
+        # Approximate search execution branch
+        if search_type == "approx":
+            # When metadata filtering is supplied, use planned exact pre-filtered fallback
+            if norm_filter is None:
+                with self._lock:
+                    index = self._indices.get(norm_metric)
+
+                # Query metric-specific index if available; otherwise fall back to exact search
+                if index is not None:
+                    hits = index.search(query=query_vec, k=k, ef=ef_search)
+                    results: list[ScoredPoint] = []
+                    with self._lock:
+                        for p_id, score in hits:
+                            if p_id in self._points:
+                                point = self._points[p_id]
+                                payload_copy = copy.deepcopy(point.payload) if with_payload else {}
+                                vector_copy = point.vector.copy() if with_vector else None
+                                results.append(
+                                    ScoredPoint(
+                                        id=point.id,
+                                        score=score,
+                                        payload=payload_copy,
+                                        vector=vector_copy,
+                                    )
+                                )
+                    return results
 
         with self._lock:
             if not self._points:
